@@ -1,0 +1,23 @@
+{
+  "name": "react-flutter-renderer",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "tsx index.ts",
+    "poc": "tsx poc.ts"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-reconciler": "^0.29.0",
+    "ws": "^8.16.0",
+    "yoga-layout": "^3.0.2"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-reconciler": "^0.28.0",
+    "@types/ws": "^8.5.0",
+    "esbuild": "^0.28.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.4.0"
+  }
+}
