@@ -12,7 +12,7 @@ import {
   sendMessage,
   registerEventListener,
   removeEventListeners,
-} from './ipcBridge.js';
+} from "./ipcBridge.js";
 import {
   createYogaNode,
   applyYogaProps,
@@ -21,22 +21,21 @@ import {
   destroyYogaNode,
   recalculateAndSendLayout,
   getRootYogaNode,
-} from './yogaLayout.js';
-import type { Instance, TextInstance, Container, Props } from './types.js';
+} from "./yogaLayout.js";
+import type { Instance, TextInstance, Container, Props } from "./types.js";
 
 let idCounter = 0;
-const ROOT_ID = 'root';
+const ROOT_ID = "root";
 
 function generateId(type: string): string {
   return `${type}-${++idCounter}`;
 }
 
-/** Strip children and function props before sending over IPC — functions can't be serialized. */
 function sanitizeProps(props: Props): Props {
   const out: Props = {};
   for (const [k, v] of Object.entries(props)) {
-    if (k === 'children') continue;
-    if (typeof v === 'function') continue;
+    if (k === "children") continue;
+    if (typeof v === "function") continue;
     out[k] = v;
   }
   return out;
@@ -58,7 +57,7 @@ const hostConfig = {
   prepareScopeUpdate: () => {},
   getInstanceFromScope: () => null,
 
-  // ── Context ──────────────────────────────────────────────────────────────
+  // Context
   createContainer(containerInfo: Container): Container {
     return containerInfo;
   },
@@ -71,19 +70,18 @@ const hostConfig = {
     return parentHostContext;
   },
 
-  // ── Creation ─────────────────────────────────────────────────────────────
+  // Creation
   createInstance(type: string, props: Props): Instance {
     const id = generateId(type);
 
-    // Store callbacks locally — functions can't cross the IPC boundary
-    if (typeof props.onClick === 'function') {
+    if (typeof props.onClick === "function") {
       const onClick = props.onClick as (e: unknown) => void;
       registerEventListener(id, (event) => {
-        if (event.event === 'click') onClick(event);
+        if (event.event === "click") onClick(event);
       });
     }
 
-    sendMessage({ op: 'create', id, type, props: sanitizeProps(props) });
+    sendMessage({ op: "create", id, type, props: sanitizeProps(props) });
 
     return {
       id,
@@ -95,34 +93,33 @@ const hostConfig = {
   },
 
   createTextInstance(text: string): TextInstance {
-    const id = generateId('text');
-    sendMessage({ op: 'create', id, type: 'text', props: { text } });
+    const id = generateId("text");
+    sendMessage({ op: "create", id, type: "text", props: { text } });
     return { id, text, isTextNode: true };
   },
 
-  // ── Tree operations ───────────────────────────────────────────────────────
-
-  /** Called during initial render (render phase) to build subtrees bottom-up. */
+  // Tree operations
   appendInitialChild(parent: Instance, child: Instance | TextInstance): void {
     parent.children.push(child);
-    sendMessage({ op: 'appendChild', parentId: parent.id, childId: child.id });
+    sendMessage({ op: "appendChild", parentId: parent.id, childId: child.id });
     if (!child.isTextNode) {
       insertYogaChild(parent.id, child.id);
     }
   },
 
-  /** Called during commit phase when new children are added due to state changes. */
   appendChild(parent: Instance, child: Instance | TextInstance): void {
     parent.children.push(child);
-    sendMessage({ op: 'appendChild', parentId: parent.id, childId: child.id });
+    sendMessage({ op: "appendChild", parentId: parent.id, childId: child.id });
     if (!child.isTextNode) {
       insertYogaChild(parent.id, child.id);
     }
   },
 
-  /** Attaches a root-level child to the container (very top of the tree). */
-  appendChildToContainer(container: Container, child: Instance | TextInstance): void {
-    sendMessage({ op: 'appendChild', parentId: ROOT_ID, childId: child.id });
+  appendChildToContainer(
+    container: Container,
+    child: Instance | TextInstance,
+  ): void {
+    sendMessage({ op: "appendChild", parentId: ROOT_ID, childId: child.id });
     const root = getRootYogaNode();
     if (!child.isTextNode) {
       root.insertChild(child.yogaNode, root.getChildCount());
@@ -137,7 +134,7 @@ const hostConfig = {
     const idx = parent.children.indexOf(beforeChild);
     parent.children.splice(idx, 0, child);
     sendMessage({
-      op: 'insertBefore',
+      op: "insertBefore",
       parentId: parent.id,
       childId: child.id,
       beforeId: beforeChild.id,
@@ -153,7 +150,7 @@ const hostConfig = {
     beforeChild: Instance | TextInstance,
   ): void {
     sendMessage({
-      op: 'insertBefore',
+      op: "insertBefore",
       parentId: ROOT_ID,
       childId: child.id,
       beforeId: beforeChild.id,
@@ -162,7 +159,7 @@ const hostConfig = {
 
   removeChild(parent: Instance, child: Instance | TextInstance): void {
     parent.children = parent.children.filter((c) => c !== child);
-    sendMessage({ op: 'removeChild', parentId: parent.id, childId: child.id });
+    sendMessage({ op: "removeChild", parentId: parent.id, childId: child.id });
     if (!child.isTextNode) {
       removeYogaChild(parent.id, child.id);
       destroyYogaNode(child.id);
@@ -170,15 +167,16 @@ const hostConfig = {
     removeEventListeners(child.id);
   },
 
-  removeChildFromContainer(_container: Container, child: Instance | TextInstance): void {
-    sendMessage({ op: 'removeChild', parentId: ROOT_ID, childId: child.id });
+  removeChildFromContainer(
+    _container: Container,
+    child: Instance | TextInstance,
+  ): void {
+    sendMessage({ op: "removeChild", parentId: ROOT_ID, childId: child.id });
     if (!child.isTextNode) destroyYogaNode(child.id);
     removeEventListeners(child.id);
   },
 
-  // ── Updates ───────────────────────────────────────────────────────────────
-
-  /** Compute the diff between old and new props. Return null for no change, or the changed subset. */
+  // Updates
   prepareUpdate(
     _instance: Instance,
     _type: string,
@@ -188,7 +186,7 @@ const hostConfig = {
     const payload: Props = {};
     let hasChanges = false;
     for (const key of Object.keys(newProps)) {
-      if (key === 'children') continue;
+      if (key === "children") continue;
       if (oldProps[key] !== newProps[key]) {
         payload[key] = newProps[key];
         hasChanges = true;
@@ -208,54 +206,61 @@ const hostConfig = {
 
     const wirePayload = sanitizeProps(updatePayload);
     if (Object.keys(wirePayload).length > 0) {
-      sendMessage({ op: 'update', id: instance.id, props: wirePayload });
+      sendMessage({ op: "update", id: instance.id, props: wirePayload });
     }
 
-    // Re-apply layout props to Yoga if any changed
     const layoutKeys = [
-      'width', 'height', 'flex', 'flexDirection',
-      'padding', 'margin', 'justifyContent', 'alignItems',
+      "width",
+      "height",
+      "flex",
+      "flexDirection",
+      "padding",
+      "margin",
+      "justifyContent",
+      "alignItems",
     ];
     if (layoutKeys.some((k) => k in updatePayload)) {
       applyYogaProps(instance.yogaNode, newProps);
     }
 
-    // Re-register click handler if it changed
     if (updatePayload.onClick !== undefined) {
       removeEventListeners(instance.id);
-      if (typeof newProps.onClick === 'function') {
+      if (typeof newProps.onClick === "function") {
         const onClick = newProps.onClick as (e: unknown) => void;
         registerEventListener(instance.id, (event) => {
-          if (event.event === 'click') onClick(event);
+          if (event.event === "click") onClick(event);
         });
       }
     }
   },
 
-  commitTextUpdate(textInstance: TextInstance, _oldText: string, newText: string): void {
+  commitTextUpdate(
+    textInstance: TextInstance,
+    _oldText: string,
+    newText: string,
+  ): void {
     textInstance.text = newText;
-    sendMessage({ op: 'setText', id: textInstance.id, text: newText });
+    sendMessage({ op: "setText", id: textInstance.id, text: newText });
   },
 
-  // ── Commit lifecycle ──────────────────────────────────────────────────────
-
+  // Commit lifecycle
   prepareForCommit(): null {
     return null;
   },
-
-  /** Called after React's commit phase. Run Yoga layout and send positions to Flutter. */
   resetAfterCommit(_containerInfo: Container): void {
     recalculateAndSendLayout(ROOT_ID);
   },
 
-  // ── Required boilerplate ──────────────────────────────────────────────────
+  // Required boilerplate
   finalizeInitialChildren(): boolean {
     return false;
   },
   shouldSetTextContent(): boolean {
     return false;
   },
-  getPublicInstance(instance: Instance | TextInstance): Instance | TextInstance {
+  getPublicInstance(
+    instance: Instance | TextInstance,
+  ): Instance | TextInstance {
     return instance;
   },
   preparePortalMount(): void {},

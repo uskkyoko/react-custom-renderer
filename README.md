@@ -4,6 +4,8 @@ A custom React renderer that targets Flutter as its host platform.
 React runs inside Node.js; Flutter runs as a separate process.
 All communication crosses a **WebSocket IPC boundary** using a JSON mutation protocol.
 
+The Node.js side is written in **TypeScript** and run with `tsx`.
+
 ---
 
 ## Architecture
@@ -12,11 +14,11 @@ All communication crosses a **WebSocket IPC boundary** using a JSON mutation pro
 Node.js Process                        Flutter Process
 ┌──────────────────────────┐          ┌────────────────────────────┐
 │  React Components        │          │  WidgetRegistry            │
-│  (HelloWorld.jsx)        │          │  (Map<id, WidgetNode>)     │
+│  (HelloWorld.tsx)        │          │  (Map<id, WidgetNode>)     │
 │          │               │          │          │                 │
 │  react-reconciler        │          │  ReactWidgetBuilder        │
 │          │               │          │  (recursive widget build)  │
-│  hostConfig.js           │  JSON    │          │                 │
+│  hostConfig.ts           │  JSON    │          │                 │
 │  ┌───────────────────┐   │◄────────►│  WebSocket listener        │
 │  │ createInstance    │──►│ create   │          │                 │
 │  │ appendChild       │──►│ append   │  Flutter render tree       │
@@ -47,6 +49,8 @@ Node.js Process                        Flutter Process
 | Event (back)  | `{ event:"click", targetId:"button-1" }`                           |
 | Change (back) | `{ event:"change", targetId:"input-1", value:"text" }`             |
 
+All message shapes are typed as the `ProtocolMessage` union in `types.ts`.
+
 ---
 
 ## Element Types → Flutter Primitives
@@ -59,20 +63,33 @@ Node.js Process                        Flutter Process
 | `<listitem>`  | Todo list row    | `Row` with padding                  |
 | `<input>`     | Text entry       | `TextField`                         |
 
+These are declared as valid JSX in `custom-elements.d.ts`
+
 ---
 
 ## HostConfig → IPC + Yoga Mapping
 
-| hostConfig method    | IPC message                | Yoga operation                    |
-| -------------------- | -------------------------- | --------------------------------- |
-| `createInstance`     | `{ op:"create" }`          | `createYogaNode(id, props)`       |
-| `appendChild`        | `{ op:"appendChild" }`     | `insertYogaChild(parentId, id)`   |
-| `removeChild`        | `{ op:"removeChild" }`     | `removeYogaChild` + `destroyNode` |
-| `insertBefore`       | `{ op:"insertBefore" }`    | `insertYogaChild(id, idx)`        |
-| `commitUpdate`       | `{ op:"update" }`          | `applyYogaProps(node, newProps)`  |
-| `createTextInstance` | `{ op:"create" type:text}` | (no Yoga node)                    |
-| `commitTextUpdate`   | `{ op:"setText" }`         | —                                 |
-| `resetAfterCommit`   | batch `{ op:"layout" }`    | `root.calculateLayout(800, 600)`  |
+| hostConfig method    | IPC message                  | Yoga operation                    |
+| -------------------- | ---------------------------- | --------------------------------- |
+| `createInstance`     | `{ op:"create" }`            | `createYogaNode(id, props)`       |
+| `appendInitialChild` | `{ op:"appendChild" }`       | `insertYogaChild(parentId, id)`   |
+| `appendChild`        | `{ op:"appendChild" }`       | `insertYogaChild(parentId, id)`   |
+| `removeChild`        | `{ op:"removeChild" }`       | `removeYogaChild` + `destroyNode` |
+| `insertBefore`       | `{ op:"insertBefore" }`      | `insertYogaChild(id, idx)`        |
+| `commitUpdate`       | `{ op:"update" }`            | `applyYogaProps(node, newProps)`  |
+| `createTextInstance` | `{ op:"create" type:"text"}` | (no Yoga node)                    |
+| `commitTextUpdate`   | `{ op:"setText" }`           | —                                 |
+| `resetAfterCommit`   | batch `{ op:"layout" }`      | `root.calculateLayout(800, 600)`  |
+
+> `appendInitialChild` is called during the initial render (render phase).
+> `appendChild` is called during updates (commit phase). Both do the same thing here.
+
+### Callback handling over IPC
+
+Functions cannot be serialized to JSON. `onClick` and `onChange` callbacks are
+stored locally in `ipcBridge.ts` and replaced with `true` in the IPC message.
+When Flutter fires an event back, `ipcBridge` looks up the stored callback by id
+and calls it, triggering a React re-render.
 
 ---
 
@@ -81,21 +98,25 @@ Node.js Process                        Flutter Process
 ```
 react-flutter-renderer/
 ├── node-side/
-│   ├── package.json       # npm dependencies
-│   ├── ipcBridge.js       # WebSocket server + event routing
-│   ├── yogaLayout.js      # Yoga node management + calculateLayout
-│   ├── hostConfig.js      # react-reconciler host config (core)
-│   ├── renderer.js        # Creates reconciler + exposes render()
-│   ├── HelloWorld.jsx     # React todo app using custom elements
-│   ├── index.js           # Entry: start IPC + render app
-│   └── poc.js             # PoC: proves cross-process IPC works
+│   ├── package.json            # npm dependencies + scripts
+│   ├── tsconfig.json           # TypeScript config (NodeNext, strict)
+│   ├── types.ts                # Shared types: Instance, TextInstance,
+│   │                           #   Container, ProtocolMessage, IncomingEvent
+│   ├── custom-elements.d.ts    # JSX declarations for Flutter element types
+│   ├── ipcBridge.ts            # WebSocket server + event routing
+│   ├── yogaLayout.ts           # Yoga node management + calculateLayout
+│   ├── hostConfig.ts           # react-reconciler host config (core)
+│   ├── renderer.ts             # Creates reconciler + exposes render()
+│   ├── HelloWorld.tsx          # React component using custom elements
+│   ├── index.ts                # Entry: start IPC + render app
+│   └── poc.ts                  # PoC: proves cross-process IPC works
 │
 └── flutter-side/
     ├── pubspec.yaml
     └── lib/
-        ├── main.dart          # Flutter app entry, connects to WS
-        ├── widget_registry.dart  # IPC listener, WidgetNode store
-        └── widget_builder.dart   # Recursive Flutter widget builder
+        ├── main.dart               # Flutter app entry, connects to WS
+        ├── widget_registry.dart    # IPC listener, WidgetNode store
+        └── widget_builder.dart     # Recursive Flutter widget builder
 ```
 
 ---
@@ -125,18 +146,17 @@ flutter pub get
 ### Step 3a — Run the PoC (simplest demo)
 
 > **Note: the Flutter renderer is not working yet.**
-> The Flutter side cannot render the widget tree at this stage of development.
-> `poc.js` can still be used on its own to verify that the Node.js WebSocket
-> server starts correctly and sends the right JSON messages.
-> You can connect any WebSocket client (e.g. `wscat`, a browser `WebSocket`,
-> or a custom script) to `ws://localhost:9000` to inspect the protocol output.
+> `poc.ts` can be used on its own to verify that the Node.js WebSocket server
+> starts correctly and sends the right JSON messages.
+> Connect any WebSocket client (e.g. `wscat`, a browser `WebSocket`) to
+> `ws://localhost:9000` to inspect the protocol output.
 
 ```bash
 # Terminal 1: start the Node.js IPC server
 cd node-side
-node poc.js
+npm run poc
 
-# (Optional) Terminal 2: connect a WebSocket client to inspect messages
+# Terminal 2: connect a WebSocket client to inspect messages
 npx wscat -c ws://localhost:9000
 ```
 
@@ -149,55 +169,16 @@ and the corresponding JSON messages received by the client:
 4. `{ op:"layout", id:"container-1", x:0, y:0, w:800, h:600 }`
 5. `{ op:"layout", id:"text-1", x:20, y:20, w:760, h:40 }`
 
-This confirms the IPC bridge and JSON protocol are working end-to-end.
-Once the Flutter renderer is implemented, it will connect here and render the
-widget tree from these messages.
-
-### Step 3b — Run the full Todo App
+### Step 3b — Run the full app
 
 ```bash
 # Terminal 1:
 cd node-side
-node index.js
+npm start
 
 # Terminal 2:
 cd flutter-side
 flutter run
 ```
 
----
-
-## Key Design Decisions
-
-### Why WebSocket over stdin/stdout?
-
-WebSocket gives us a proper bidirectional channel with framing, reconnect support,
-and works across all platforms (including Godot/Flutter running on desktop).
-stdin/stdout pipes are simpler but one-way and platform-specific.
-
-### Why Yoga on the Node.js side?
-
-Yoga runs in Node.js so that React controls layout, not Flutter.
-This matches how React Native works: the JS thread computes layout,
-and the native thread only receives final pixel positions. Flutter receives
-`{ op:"layout", x, y, w, h }` messages and positions widgets accordingly.
-
-### Why separate processes?
-
-React (Node.js) and Flutter have fundamentally different runtimes (V8 vs Dart VM).
-Running them in separate processes means they don't block each other,
-and Flutter can run its own event loop independently. The IPC bridge
-is the only coupling point.
-
----
-
-## Grading Checklist
-
-- [x] **Architecture Diagram** — two-process pipeline with IPC boundary
-- [x] **Yoga placement** — Node.js side, `calculateLayout` in `resetAfterCommit`
-- [x] **Event flow** — Flutter → WebSocket → `registerEventListener` → React callback
-- [x] **JSON Protocol** — all 8 operations defined and implemented
-- [x] **Element Types** — 5 types mapped to Flutter primitives
-- [x] **HostConfig mapping** — all key methods documented and implemented
-- [x] **Feasibility PoC** — `poc.js` proves cross-process IPC end-to-end
-- [x] **Todo App** — full React todo app using custom element types
+> Use `npm start` / `npm run poc`
