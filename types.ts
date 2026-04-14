@@ -1,12 +1,11 @@
 import Yoga from "yoga-layout";
 
-// ── Basic aliases
+// Basic aliases
 export type Type = string;
 export type Props = Record<string, unknown>;
 export type YogaNode = ReturnType<typeof Yoga.Node.create>;
 
-// ── Element tree nodes
-
+// Element tree nodes
 export interface Instance {
   id: string;
   type: string;
@@ -28,7 +27,7 @@ export interface Container {
   children: Instance[];
 }
 
-// ── JSON protocol messages (Node.js → Flutter)
+// JSON protocol messages (Node.js → Flutter)
 export type ProtocolMessage =
   | { op: "create"; id: string; type: string; props: Props }
   | { op: "update"; id: string; props: Props }
@@ -39,7 +38,7 @@ export type ProtocolMessage =
   | { op: "setText"; id: string; text: string }
   | { op: "layout"; id: string; x: number; y: number; w: number; h: number };
 
-// ── Event messages (Flutter → Node.js)
+// Event messages (Flutter → Node.js)
 export interface IncomingEvent {
   event: string;
   targetId: string;
